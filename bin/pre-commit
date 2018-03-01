@@ -1,0 +1,65 @@
+#!/usr/bin/env ruby
+
+require_relative 'phase_config'
+
+def show_diff(old_list, new_list)
+  old = extract_challenges(old_list)
+  updated = extract_challenges(new_list)
+
+  if old != updated
+    puts ""
+    removed = old - updated
+    added = updated - old
+
+    puts "Pre-Commit Hook is updating the challenge list.\n\n"
+
+    if removed.any?
+      puts "Removed (#{removed.count}):"
+      puts removed.map {|challenge| " * #{challenge}\n" }
+      puts ""
+    end
+
+    if added.any?
+      puts "Added (#{added.count}):"
+      puts added.map {|challenge| " * #{challenge}\n" }
+      puts ""
+    end
+  end
+end
+
+def extract_challenges(data)
+  data.values.inject([]){ |result, cell| result + cell.values.flatten }.sort.uniq
+end
+
+def warn_and_exit(e)
+  STDERR.puts "Pre-commit failed: #{e}\n"
+  STDERR.puts "You can skip the pre-commit hook with 'git commit --no-verify'."
+  STDERR.puts "If you skip it, please have a good reason, and please note it in the PR."
+  exit(1)
+end
+
+begin
+  PROJECT_DIR = File.join(ENV["GIT_DIR"], "..")
+  CONFIG_DIR = File.join(PROJECT_DIR, "config")
+  JSON_CONFIG_PATH = File.join(CONFIG_DIR, "challenges.json")
+
+  old_list = JSON.parse(File.read(JSON_CONFIG_PATH))
+  new_list = PhaseConfig::challenges_as_hash(PROJECT_DIR)
+  json = JSON.pretty_generate(new_list)
+
+  show_diff(old_list, new_list)
+
+  File.open(JSON_CONFIG_PATH, "w") {|f| f.write(json + "\n")}
+
+  git_add_cmd = "git add #{JSON_CONFIG_PATH}"
+  git_add_result = `#{git_add_cmd}`
+  if $? == false
+    err = "Failed to stage config files: #{git_add_cmd}\n"
+    err << "git exited with non-0 status.\n"
+    err << git_add_result
+    warn_and_exit(err)
+  end
+rescue Exception => e
+  STDERR.puts e.backtrace
+  warn_and_exit(e)
+end
